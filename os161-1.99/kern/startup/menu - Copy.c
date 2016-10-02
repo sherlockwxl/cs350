@@ -525,11 +525,10 @@ static
 int
 cmd_dth()
 {
-	extern uint32_t dbflags;
-	if(dbflags != DB_THREADS)
+	if(dbflags != 6)
 	{
-		dbflags = DB_THREADS;
-		//kprintf("flag changed");
+		dbflags = 6;
+		printf("flag changed");
 	}
 	return 0;
 }
