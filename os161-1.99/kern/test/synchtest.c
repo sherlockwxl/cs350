@@ -83,6 +83,8 @@ inititems(void)
 	}
 	if (testlock==NULL) {
 		testlock = lock_create("testlock");
+		lock_acquire(testlock);
+		lock_release(testlock);
 		if (testlock == NULL) {
 			panic("synchtest: lock_create failed\n");
 		}
