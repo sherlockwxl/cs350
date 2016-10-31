@@ -73,7 +73,6 @@ void
 spinlock_acquire(struct spinlock *lk)
 {
 	struct cpu *mycpu;
-
 	splraise(IPL_NONE, IPL_HIGH);
 
 	/* this must work before curcpu initialization */

@@ -41,21 +41,37 @@
  * Unless you're implementing multithreaded user processes, the only
  * process that will have more than one thread is the kernel process.
  */
-
+#define PROCINLINE
+#define INTINLINE
 #include <types.h>
+#include <array.h>
 #include <proc.h>
+#include <limits.h>
 #include <current.h>
 #include <addrspace.h>
 #include <vnode.h>
 #include <vfs.h>
 #include <synch.h>
 #include <kern/fcntl.h>  
+//#include <syscall.h>
+#include "opt-A2.h"
+
+
+
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+#if OPT_A2 
+struct procarray *procsarray;
+struct lock *procsarray_lock;
+//struct intarray *childrenpid;
+//struct array *exitcode;
+static int exitcodes[PID_MAX];
+//int procarray_addwithreuse(struct array *, void *val, unsigned *index_ret);
 
+#endif
 /*
  * Mechanism for making the kernel menu thread sleep while processes are running
  */
@@ -78,6 +94,7 @@ static
 struct proc *
 proc_create(const char *name)
 {
+kprintf("create called\n");
 	struct proc *proc;
 
 	proc = kmalloc(sizeof(*proc));
@@ -103,7 +120,30 @@ proc_create(const char *name)
 	proc->console = NULL;
 #endif // UW
 
+#if OPT_A2
+	proc->pid=0;
+	proc->parentproc=NULL;
+	//proc->childrenpid=array_create();
+	//array_init(proc->childrenpid);
+	intarray_init(&proc->childrenpid);
+	procarray_init(&proc->childrenproc);
+	proc->pidlock=lock_create("pidlock");
+	proc->pidcv = cv_create("pidcv");
+	if(proc->pidlock==NULL||proc->pidcv==NULL){
+		panic("proc_create panic when init lock and cv\n");
+	}
+	//lock_acquire(procsarray_lock);
+	/*unsigned temppid;
+	procarray_addwithreuset2(procsarray, proc, &temppid,exitcode);
+
+	proc->pid=temppid;
+	exitcode[proc->pid]=0;*/
+	//lock_release(procsarray_lock);
+	kprintf("create done\n");
 	return proc;
+#else
+	return proc;
+	#endif
 }
 
 /*
@@ -162,10 +202,24 @@ proc_destroy(struct proc *proc)
 	  vfs_close(proc->console);
 	}
 #endif // UW
+	
+#if OPT_A2
+	removeallchild(proc);
+	if(proc->parentproc!=NULL){
+	spinlock_acquire(&proc->parentproc->p_lock);
+	removeparent(proc);
+	spinlock_release(&proc->parentproc->p_lock);}
 
+	lock_destroy(proc->pidlock);
+	cv_destroy(proc->pidcv);
+	//KASSERT(lock_do_i_hold(procsarray_lock));
+	lock_acquire(procsarray_lock);
+	procarray_set(procsarray, proc->pid, NULL);
+	lock_release(procsarray_lock);
+	//array_cleanup(proc->childrenpid);
+#endif//end if for opt a2
 	threadarray_cleanup(&proc->p_threads);
 	spinlock_cleanup(&proc->p_lock);
-
 	kfree(proc->p_name);
 	kfree(proc);
 
@@ -193,6 +247,22 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+kprintf("boot called\n");
+#if OPT_A2
+  procsarray_lock = lock_create("procsarray_lock");
+  procsarray=procarray_create();
+  procarray_init(procsarray);
+ // exitcode=array_create();
+  //array_init(exitcode);
+  for(int i =0;i<PID_MAX;i++)
+  {
+  	exitcodes[i]=-1;
+  }
+  if (procsarray_lock == NULL) {
+  	panic("procsarray_lock create failed\n");
+  }
+
+#endif
   kproc = proc_create("[kernel]");
   if (kproc == NULL) {
     panic("proc_create for kproc failed\n");
@@ -219,6 +289,7 @@ proc_bootstrap(void)
 struct proc *
 proc_create_runprogram(const char *name)
 {
+	kprintf("run called\n");
 	struct proc *proc;
 	char *console_path;
 
@@ -270,7 +341,21 @@ proc_create_runprogram(const char *name)
 	proc_count++;
 	V(proc_count_mutex);
 #endif // UW
+#if OPT_A2
+	lock_acquire(procsarray_lock);
+	unsigned temppid;
+    if (procarray_addwithreuset2(procsarray, proc, &temppid,exitcodes)){
+    	panic("procsarray add failed\n");
+    }
+    proc->pid=temppid;
+	exitcodes[proc->pid]=0;
+    lock_release(procsarray_lock);
+#endif
+	/*
+	procarray_addwithreuset2(procsarray, proc, &temppid,exitcode);
 
+	proc->pid=temppid;
+	exitcode[proc->pid]=0;*/
 	return proc;
 }
 
@@ -284,7 +369,6 @@ proc_addthread(struct proc *proc, struct thread *t)
 	int result;
 
 	KASSERT(t->t_proc == NULL);
-
 	spinlock_acquire(&proc->p_lock);
 	result = threadarray_add(&proc->p_threads, t, NULL);
 	spinlock_release(&proc->p_lock);
@@ -307,7 +391,6 @@ proc_remthread(struct thread *t)
 
 	proc = t->t_proc;
 	KASSERT(proc != NULL);
-
 	spinlock_acquire(&proc->p_lock);
 	/* ugh: find the thread in the array */
 	num = threadarray_num(&proc->p_threads);
@@ -341,7 +424,6 @@ curproc_getas(void)
 		return NULL;
 	}
 #endif
-
 	spinlock_acquire(&curproc->p_lock);
 	as = curproc->p_addrspace;
 	spinlock_release(&curproc->p_lock);
@@ -357,10 +439,92 @@ curproc_setas(struct addrspace *newas)
 {
 	struct addrspace *oldas;
 	struct proc *proc = curproc;
-
 	spinlock_acquire(&proc->p_lock);
 	oldas = proc->p_addrspace;
 	proc->p_addrspace = newas;
 	spinlock_release(&proc->p_lock);
 	return oldas;
 }
+#if OPT_A2
+struct proc * 
+searchpid(pid_t pid)
+{
+	unsigned i;
+	struct proc *process = NULL;
+	//KASSERT(lock_do_i_hold(procsarray_lock));
+	lock_acquire(procsarray_lock);
+	//kprintf("acquire s");
+		for (i=0; i<procarray_num(procsarray); i++) 
+		{
+			process = procarray_get(procsarray, i);
+			if (process->pid == pid){
+				kprintf("found at %d\n",pid);
+			break;
+		}
+		}
+	lock_release(procsarray_lock);
+
+	return process;
+}
+
+void removeallchild(struct proc *p)
+{
+	//KASSERT(spinlock_do_i_hold(&p->p_lock));
+	//spinlock_acquire(&p->p_lock);
+	for(unsigned i=0;i<procarray_num(&p->childrenproc);i++)
+	{
+		struct proc *proc=procarray_get(&p->childrenproc,i);
+		proc->parentproc=NULL;		
+	}
+	//spinlock_release(&p->p_lock);
+	return ;
+}
+
+void removeparent(struct proc *p)
+{
+	struct proc *p2 = p->parentproc;
+	//spinlock_acquire(&p2->p_lock);
+		for (unsigned i = 0; i< procarray_num(&p2->childrenproc); i++){
+			struct proc *child = procarray_get(&p2->childrenproc, i);
+			if (child->pid == p->pid){
+				procarray_remove(&p2->childrenproc, i);
+				break;
+			}
+		}
+	//	spinlock_release(&p2->p_lock);
+	return;
+}
+
+int getexitcode(pid_t pid)
+{
+	
+	return exitcodes[pid];
+	
+}
+bool readytoexit(pid_t pid)
+{
+	bool result=true;
+	struct proc *p2 = searchpid(pid);
+	for(unsigned i =0;i<procarray_num(&p2->childrenproc); i++)
+	{
+		struct proc *child = procarray_get(&p2->childrenproc, i);
+		if(exitcodes[child->pid]==-1)
+		{
+			result=false;
+		}
+	}
+	return result;
+}
+void freepid(pid_t pid)
+{
+	//spinlock_acquire(&curproc->p_lock);
+	exitcodes[pid]=-1;
+	//spinlock_release(&curproc->p_lock);
+}
+void saveexitcode(pid_t pid,int exitcode1)
+{
+	//spinlock_acquire(&curproc->p_lock);
+	exitcodes[pid]=exitcode1;
+	//spinlock_release(&curproc->p_lock);
+}
+#endif

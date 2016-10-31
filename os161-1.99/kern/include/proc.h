@@ -38,7 +38,19 @@
 
 #include <spinlock.h>
 #include <thread.h> /* required for struct threadarray */
-
+#include "opt-A2.h"
+#if OPT_A2
+#ifndef PROCINLINE
+#define PROCINLINE INLINE
+#endif
+#ifndef INTINLINE
+#define INTINLINE INLINE
+#endif
+	DECLARRAY_BYTYPE(procarray, struct proc);
+	DEFARRAY_BYTYPE(procarray, struct proc, PROCINLINE);
+  DECLARRAY_BYTYPE(intarray, int);
+  DEFARRAY_BYTYPE(intarray, int, INTINLINE);
+	#endif
 struct addrspace;
 struct vnode;
 #ifdef UW
@@ -69,6 +81,14 @@ struct proc {
 #endif
 
 	/* add more material here as needed */
+  #if OPT_A2
+    pid_t pid;
+    struct proc *parentproc; // parent 
+    struct procarray childrenproc; //children
+    struct lock *pidlock;
+    struct cv *pidcv;
+    struct intarray childrenpid;
+#endif
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
@@ -100,5 +120,15 @@ struct addrspace *curproc_getas(void);
 /* Change the address space of the current process, and return the old one. */
 struct addrspace *curproc_setas(struct addrspace *);
 
-
+#if OPT_A2
+    struct proc *searchpid(pid_t pid);
+    void removeallchild(struct proc *p);
+    void removeparent(struct proc *p);
+    struct lock;
+    extern struct lock *procarray_lock;
+    int getexitcode(pid_t pid);
+    bool readytoexit(pid_t pid);
+    void freepid(pid_t pid);
+    void saveexitcode(pid_t pid,int exitcode1);
+#endif
 #endif /* _PROC_H_ */
