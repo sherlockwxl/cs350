@@ -46,10 +46,14 @@
 #ifndef INTINLINE
 #define INTINLINE INLINE
 #endif
+struct pidstore
+{
+  pid_t pid;
+};
 	DECLARRAY_BYTYPE(procarray, struct proc);
 	DEFARRAY_BYTYPE(procarray, struct proc, PROCINLINE);
-  DECLARRAY_BYTYPE(intarray, int);
-  DEFARRAY_BYTYPE(intarray, int, INTINLINE);
+  DECLARRAY_BYTYPE(intarray, struct pidstore);
+  DEFARRAY_BYTYPE(intarray, struct pidstore, INTINLINE);
 	#endif
 struct addrspace;
 struct vnode;

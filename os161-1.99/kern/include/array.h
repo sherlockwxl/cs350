@@ -29,9 +29,10 @@
 
 #ifndef _ARRAY_H_
 #define _ARRAY_H_
-
+#include "opt-A2.h"
 #ifdef UW
 #include <lib.h>
+#include <limits.h>
 #endif
 
 #define ARRAYS_CHECKED
@@ -77,7 +78,7 @@ void array_set(const struct array *, unsigned index, void *val);
 int array_setsize(struct array *, unsigned num);
 int array_add(struct array *, void *val, unsigned *index_ret);
 void array_remove(struct array *, unsigned index);
-
+int array_addwithreuset2(struct array *, void *val, unsigned *index_ret, int *b);
 /*
  * Inlining for base operations
  */
@@ -111,7 +112,6 @@ array_add(struct array *a, void *val, unsigned *index_ret)
 {
 	unsigned index;
 	int ret;
-
 	index = a->num;
 	ret = array_setsize(a, index+1);
 	if (ret) {
@@ -123,6 +123,67 @@ array_add(struct array *a, void *val, unsigned *index_ret)
 	}
 	return 0;
 }
+#if OPT_A2
+ARRAYINLINE int
+array_addwithreuset2(struct array *a, void *val, unsigned *index_ret,int *b)
+{
+	unsigned index;
+	int reused=0;
+	for(index =0;index<a->num;index++)
+	{
+		if(index>=PID_MIN){
+		if((a->v[index]==NULL)&&(b[index]==-1))
+		{
+			a->v[index]=val;
+			*index_ret=index;
+			reused=1;
+			break;
+		}
+	}
+	}
+	if(reused==0)
+	{
+		int runned=0;
+		if(a->num==0)
+		{
+			if(array_setsize(a,index+1)!=0)
+		{
+			panic("cant extend array out of memory");
+		}
+			a->v[0]=NULL;
+			if(array_setsize(a,index+1)!=0)
+		{
+			panic("cant extend array out of memory");
+		}
+			a->v[1]=NULL;
+			runned=1;
+		}
+		if(runned==1){
+			index=2;
+		}
+		else{
+		index=a->num;
+	}
+		if(array_setsize(a,index+1)!=0)
+		{
+			panic("cant extend array out of memory");
+		}
+		else
+		{
+			a->v[index]=val;
+			*index_ret=index;
+		}
+	}
+	/*for(index =0;index<a->num;index++)
+	{
+		if(a->v[index]==NULL)
+		{
+			//kprintf("found a null at %d\n",index);
+		}
+	}*/
+	return 0;
+}
+#endif
 
 /*
  * Bits for declaring and defining typed arrays.
@@ -177,7 +238,9 @@ array_add(struct array *a, void *val, unsigned *index_ret)
 	void ARRAY##_set(struct ARRAY *a, unsigned index, T *val); \
 	int ARRAY##_setsize(struct ARRAY *a, unsigned num);	\
 	int ARRAY##_add(struct ARRAY *a, T *val, unsigned *index_ret); \
-	void ARRAY##_remove(struct ARRAY *a, unsigned index)
+	void ARRAY##_remove(struct ARRAY *a, unsigned index); \
+	int ARRAY##_addwithreuset2(struct ARRAY *a, T *val, unsigned *index_ret,int *b)
+
 
 #define DEFARRAY_BYTYPE(ARRAY, T, INLINE) \
 	INLINE struct ARRAY *					\
@@ -244,7 +307,13 @@ array_add(struct array *a, void *val, unsigned *index_ret)
 	ARRAY##_remove(struct ARRAY *a, unsigned index)		\
 	{							\
 		return array_remove(&a->arr, index);		\
+	}\
+	INLINE int\
+	ARRAY##_addwithreuset2(struct ARRAY *a, T *val, unsigned *index_ret,int *b)\
+	{\
+		return array_addwithreuset2(&a->arr, (void *)val, index_ret,b);\
 	}
+
 
 #define DECLARRAY(T) DECLARRAY_BYTYPE(T##array, struct T)
 #define DEFARRAY(T, INLINE) DEFARRAY_BYTYPE(T##array, struct T, INLINE)

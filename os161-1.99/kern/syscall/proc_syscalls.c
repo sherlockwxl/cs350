@@ -23,45 +23,50 @@ void temppass(void *tf,unsigned long data)
   struct trapframe *tf1=tf;
   enter_forked_process(tf1);
 }
+
 int sys_fork(struct trapframe *tf, pid_t *pid)
 {
   //assign pid already done
   struct proc *childproc = proc_create_runprogram(curproc->p_name);
   if (childproc == NULL) {
-    kprintf("1");
-        return ENOMEM;
-    }
+   // //kprintf("1");
+    return ENOMEM;
+  }
     //address space
   int errno = as_copy(curproc->p_addrspace, &childproc->p_addrspace);
   if(errno)
   {
     proc_destroy(childproc);
-    kprintf("2");
+    //kprintf("2");
     return errno;
   }
   struct trapframe *childtrapframe = kmalloc(sizeof(struct trapframe));
-    if (childtrapframe == NULL) {
-      kprintf("3");
-        kfree(childtrapframe);
-        as_destroy(childproc->p_addrspace);
-        proc_destroy(childproc);
-        return ENOMEM;
-    }
-     memcpy(childtrapframe, tf, sizeof(struct trapframe));
-     childproc->parentproc=curproc;
-     procarray_add(&curproc->childrenproc, childproc, NULL);
-     if(thread_fork(curproc->p_name, childproc, &temppass, childtrapframe, 0))
-     {
-      kprintf("4");
-      proc_destroy(childproc);
-      kfree(childtrapframe);
-      return ENOMEM;
-     }
-     *pid=childproc->pid;
-     intarray_add(&curproc->childrenpid,pid,NULL);
-     
-     kprintf("taeget pid is %d",*pid);
-     return 0;
+  if (childtrapframe == NULL) {
+      //kprintf("3");
+    kfree(childtrapframe);
+    as_destroy(childproc->p_addrspace);
+    proc_destroy(childproc);
+    return ENOMEM;
+  }
+  memcpy(childtrapframe, tf, sizeof(struct trapframe));
+  childproc->parentproc=curproc;
+  procarray_add(&curproc->childrenproc, childproc, NULL);
+  if(thread_fork(curproc->p_name, childproc, &temppass, childtrapframe, 0))
+  {
+      //kprintf("4");
+    proc_destroy(childproc);
+    kfree(childtrapframe);
+    return ENOMEM;
+  }
+
+  *pid=childproc->pid;
+     //kprintf("add called on %d\n",*pid);
+  struct pidstore * pidtemp= kmalloc(sizeof(struct pidstore));
+  pidtemp->pid=*pid;
+  intarray_add(&curproc->childrenpid,pidtemp,NULL);
+
+     //kprintf("taeget pid is %d",*pid);
+  return 0;
 
 }
 #endif
@@ -71,47 +76,43 @@ void sys__exit(int exitcode) {
   struct proc *p = curproc;
   /* for now, just include this to keep the compiler from complaining about
      an unused variable */
-
+  //kprintf("exit called at %d",curproc->pid);
   DEBUG(DB_SYSCALL,"Syscall: _exit(%d)\n",exitcode);
   
 #if OPT_A2
-    if(spinlock_do_i_hold(&curproc->p_lock))
-  {
-    kprintf("222");
-  }
-    spinlock_acquire(&curproc->p_lock);
-    for (unsigned i = 0; i < intarray_num(&curproc->childrenpid); i++) {
-        int targetpid = *intarray_get(&curproc->childrenpid, i);
-        kprintf("i is %d and pid is %d\n",i,targetpid);
-        if(searchpid(targetpid)==NULL)
-        {
-          spinlock_release(&curproc->p_lock);
-          freepid(targetpid);
-            if(spinlock_do_i_hold(&curproc->p_lock))
-  {
-    kprintf("333");
-  }
-          spinlock_acquire(&curproc->p_lock);
-        }
-        else
-        {
-          struct proc *targetproc=searchpid(targetpid);
-          targetproc->parentproc=NULL;
-        }
-    }
-    spinlock_release(&curproc->p_lock);
-    saveexitcode(curproc->pid,exitcode);
-    if(curproc->parentproc==NULL)
+
+  spinlock_acquire(&curproc->p_lock);
+  for (unsigned i = 0; i < intarray_num(&curproc->childrenpid); i++) {
+    int targetpid = (intarray_get(&curproc->childrenpid, i))->pid;
+        //kprintf("i is %d and pid is %d\n",i,targetpid);
+    if(searchpid(targetpid)==NULL)
     {
-      freepid(curproc->pid);
+      spinlock_release(&curproc->p_lock);
+          //kprintf("free child calkled\n");
+      freepid(targetpid);
+
+      spinlock_acquire(&curproc->p_lock);
     }
     else
     {
-
-      lock_acquire(curproc->pidlock);
-      cv_broadcast(curproc->pidcv, curproc->pidlock); 
-      lock_release(curproc->pidlock);
+      struct proc *targetproc=searchpid(targetpid);
+      targetproc->parentproc=NULL;
     }
+  }
+  spinlock_release(&curproc->p_lock);
+  saveexitcode(curproc->pid,exitcode);
+  if(curproc->parentproc==NULL)
+  {
+      //kprintf("free self calkled\n");
+    freepid(curproc->pid);
+  }
+  else
+  {
+
+    lock_acquire(curproc->pidlock);
+    cv_broadcast(curproc->pidcv, curproc->pidlock); 
+    lock_release(curproc->pidlock);
+  }
 #endif
   KASSERT(curproc->p_addrspace != NULL);
   as_deactivate();
@@ -159,9 +160,9 @@ sys_getpid(pid_t *retval)
 
 int
 sys_waitpid(pid_t pid,
-	    userptr_t status,
-	    int options,
-	    pid_t *retval)
+ userptr_t status,
+ int options,
+ pid_t *retval)
 {
   int exitstatus;
   int result;
@@ -184,21 +185,39 @@ sys_waitpid(pid_t pid,
   }
   if(spinlock_do_i_hold(&curproc->p_lock))
   {
-    kprintf("111");
+    //kprintf("111");
   }
-  //spinlock_acquire(&curproc->p_lock);
-  struct proc *target=searchpid(pid);
+ // spinlock_acquire(&curproc->p_lock);
+  //kprintf("search for pid %d\n",pid);
+  
   int code=getexitcode(pid);
-  if((target==NULL)&&(code==-1))
-  {
-    *retval=-1;
-    return ESRCH;
+  if(code==-1){//child not exited
+    struct proc *target=searchpid(pid);
+    if((target==NULL)&&(code==-1))
+    {
+      *retval=-1;
+      return ESRCH;
+    }
+    if(target->parentproc->pid!=curproc->pid)
+    {
+      *retval = -1;
+      return ECHILD;
+    }
+    if(target!=NULL)
+    {
+      lock_acquire(target->pidlock);
+      while(getexitcode(pid) == -1) {
+        cv_wait(target->pidcv, target->pidlock);
+      }
+      lock_release(target->pidlock);
+      code=getexitcode(pid);
+    }
+  //spinlock_release(&curproc->p_lock);
   }
-  if(target->parentproc->pid!=curproc->pid)
-  {
-    *retval = -1;
-    return ECHILD;
-  }
+  else{
+  //spinlock_release(&curproc->p_lock);
+    code=getexitcode(pid);
+  /*struct proc *target=searchpid(pid);
   if((target==NULL)&&(code!=-1))
   {
    // spinlock_release(&curproc->p_lock);//target akready exit get exitcode
@@ -212,6 +231,7 @@ sys_waitpid(pid_t pid,
         }
     lock_release(target->pidlock);
     code=getexitcode(pid);
+  }*/
   }
 
   exitstatus = _MKWAIT_EXIT(code);
@@ -229,3 +249,67 @@ sys_waitpid(pid_t pid,
 
 }
 
+ #if OPT_A2
+int
+sys_execv(const_userptr_t path, userptr_t argv){
+
+  struct addrspace *as;
+  struct vnode *v;
+  vaddr_t entrypoint, stackptr;
+  int result，argnum;
+  //check null
+  if((char*)path==NULL||(char**)argv=NULL)
+  {
+    return EFAULT;
+  }
+  /*step one Count the number of arguments and copy them into the kernel*/
+  for(argnum=0;argv[argnum] !=NULL;argnum++)
+  {
+    if(argnum>ARG_MAX)
+    {
+      return E2BIG;
+    }
+  }
+  char**argvs=kmalloc(argnum+1);
+  KASSERT(argvs==NULL);
+  size_t * offsetarray=kmalloc(argnum*sizeof(size_t));
+  int offest=0;
+  for(int i = 0 ; i < argnum;i++)
+  {
+    char * temp=NULL:
+    result =copyin(argv+i*sizeof(char*), &temp, sizeof(char*));
+    if(result)
+    {
+      return result;
+    }
+    argvs[i]=kmalloc(PATH_MAX);
+    int templength;
+    if(copyinstr(temp,argvs[i],PATH_MAX,&templength))
+    {
+      return 0;
+    }
+    offsetarray[i]=offest;
+    offset=offset+ROUNDUP(templength+1,8);
+
+  }
+  argvs[argnum]=NULL;
+  //the path
+  char *kernelpath=kamlloc(PATH_MAX);
+  KASSERT(kernelpath==NULL);
+  int totallength;
+
+  if(copyinstr(path,kernelpath,PATH_MAX,&totallength))
+  {
+    return 0;
+  }
+  if(totallength<=1)
+  {
+    return ENOENT;
+  }
+//
+
+  runprogram(kernelpath,agrnum,argvs);
+}
+
+
+#endif

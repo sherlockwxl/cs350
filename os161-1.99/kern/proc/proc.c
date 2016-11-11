@@ -69,6 +69,7 @@ struct lock *procsarray_lock;
 //struct intarray *childrenpid;
 //struct array *exitcode;
 static int exitcodes[PID_MAX];
+
 //int procarray_addwithreuse(struct array *, void *val, unsigned *index_ret);
 
 #endif
@@ -94,7 +95,7 @@ static
 struct proc *
 proc_create(const char *name)
 {
-kprintf("create called\n");
+////kprintf("create called\n");
 	struct proc *proc;
 
 	proc = kmalloc(sizeof(*proc));
@@ -139,7 +140,7 @@ kprintf("create called\n");
 	proc->pid=temppid;
 	exitcode[proc->pid]=0;*/
 	//lock_release(procsarray_lock);
-	kprintf("create done\n");
+	//kprintf("create done\n");
 	return proc;
 #else
 	return proc;
@@ -247,7 +248,7 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
-kprintf("boot called\n");
+//kprintf("boot called\n");
 #if OPT_A2
   procsarray_lock = lock_create("procsarray_lock");
   procsarray=procarray_create();
@@ -289,7 +290,7 @@ kprintf("boot called\n");
 struct proc *
 proc_create_runprogram(const char *name)
 {
-	kprintf("run called\n");
+	//kprintf("run called\n");
 	struct proc *proc;
 	char *console_path;
 
@@ -347,6 +348,7 @@ proc_create_runprogram(const char *name)
     if (procarray_addwithreuset2(procsarray, proc, &temppid,exitcodes)){
     	panic("procsarray add failed\n");
     }
+    ////kprintf("add done pid is %d\n",temppid);
     proc->pid=temppid;
 	exitcodes[proc->pid]=0;
     lock_release(procsarray_lock);
@@ -449,22 +451,26 @@ curproc_setas(struct addrspace *newas)
 struct proc * 
 searchpid(pid_t pid)
 {
-	unsigned i;
-	struct proc *process = NULL;
 	//KASSERT(lock_do_i_hold(procsarray_lock));
 	lock_acquire(procsarray_lock);
-	//kprintf("acquire s");
-		for (i=0; i<procarray_num(procsarray); i++) 
+	////kprintf("acquire s");
+		for (unsigned i=PID_MIN-1; i<procarray_num(procsarray); i++) 
 		{
-			process = procarray_get(procsarray, i);
+			//kprintf("check now at %d\n",i);
+			struct proc *process = procarray_get(procsarray, i);
+			if(process!=NULL){
+			//kprintf("pid is  %d\n",process->pid);
 			if (process->pid == pid){
-				kprintf("found at %d\n",pid);
-			break;
+				//kprintf("found at %d\n",pid);
+				lock_release(procsarray_lock);
+				return process;
+				}
 		}
 		}
 	lock_release(procsarray_lock);
 
-	return process;
+	return NULL;
+
 }
 
 void removeallchild(struct proc *p)
@@ -518,13 +524,18 @@ bool readytoexit(pid_t pid)
 void freepid(pid_t pid)
 {
 	//spinlock_acquire(&curproc->p_lock);
+	//kprintf("free called %d\n",pid);
+	lock_acquire(procsarray_lock);
 	exitcodes[pid]=-1;
+	lock_release(procsarray_lock);
 	//spinlock_release(&curproc->p_lock);
 }
 void saveexitcode(pid_t pid,int exitcode1)
 {
 	//spinlock_acquire(&curproc->p_lock);
+	lock_acquire(procsarray_lock);
 	exitcodes[pid]=exitcode1;
+	lock_release(procsarray_lock);
 	//spinlock_release(&curproc->p_lock);
 }
 #endif
