@@ -45,6 +45,7 @@
 #include <syscall.h>
 #include <test.h>
 #include "opt-A2.h"
+#include <copyinout.h>
 /*
  * Load program "progname" and start running it in usermode.
  * Does not return except on error.
@@ -64,7 +65,7 @@ runprogram(char *progname)
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
-
+	struct addrspace *curproc_as = curproc_getas();
 	/* Open the file. */
 	result = vfs_open(progname, O_RDONLY, 0, &v);
 	if (result) {
@@ -72,7 +73,7 @@ runprogram(char *progname)
 	}
 
 	/* We should be a new process. */
-	KASSERT(curproc_getas() == NULL);
+	//KASSERT(curproc_getas() == NULL);
 
 	/* Create a new address space. */
 	as = as_create();
@@ -106,14 +107,14 @@ runprogram(char *progname)
 	char**temparr=kmalloc(sizeof(char *)*(argnum+1));
 	for(int i = argnum-1;i>=0;i--)
 	{
-		stackptr=stackptr-ROUNDUP(arg_len+1,8);
-		result=copyout(args[i],(userptr_t)stackptr,ROUNDUP(arg_len+1,8));
+		stackptr=stackptr-ROUNDUP(strlen(args[i])+1,8);
+		result=copyout(args[i],(userptr_t)stackptr,ROUNDUP(strlen(args[i])+1,8));
 		if (result) {
 		return result;
 	}
-	temparr[i]=*stackptr;
+	temparr[i]=(char*)stackptr;
 	}
-	offset=(argnum+1)*sizeof(char*);
+	int offset=(argnum+1)*sizeof(char*);
 	stackptr=stackptr-offset;
 	temparr[argnum]=NULL;
 	
@@ -121,9 +122,10 @@ runprogram(char *progname)
     if (result) {
       return result;
     }
+    as_destroy(curproc_as);
     kfree(temparr);
-    kfree(temparr);
-    kfree(args);
+  //  kprintf("free 2");
+   // kfree(args);
     enter_new_process(argnum /*argc*/, (userptr_t)stackptr/*userspace addr of argv*/,
 			  stackptr, entrypoint);
 

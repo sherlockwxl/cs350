@@ -12,6 +12,7 @@
 #include <addrspace.h>
 #include <copyinout.h>
 #include <synch.h>
+#include <test.h>
 #include "opt-A2.h"
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
@@ -253,50 +254,61 @@ sys_waitpid(pid_t pid,
 int
 sys_execv(const_userptr_t path, userptr_t argv){
 
-  struct addrspace *as;
-  struct vnode *v;
-  vaddr_t entrypoint, stackptr;
-  int result，argnum;
+
+  //vaddr_t entrypoint, stackptr;
+  int result,argnum=0;
   //check null
-  if((char*)path==NULL||(char**)argv=NULL)
+  if((char*)path==NULL||(char**)argv==NULL)
   {
     return EFAULT;
   }
   /*step one Count the number of arguments and copy them into the kernel*/
-  for(argnum=0;argv[argnum] !=NULL;argnum++)
+ 
+  while(true)
   {
-    if(argnum>ARG_MAX)
-    {
-      return E2BIG;
+    char * temp=NULL;
+    copyin(argv+argnum*sizeof(char*), &temp, sizeof(char*));
+    //kprintf("after copy ");
+    //kprintf(temp);
+    if(temp != NULL){
+      argnum++;
+    }else{
+      break;
     }
   }
-  char**argvs=kmalloc(argnum+1);
-  KASSERT(argvs==NULL);
-  size_t * offsetarray=kmalloc(argnum*sizeof(size_t));
-  int offest=0;
+  int length=(argnum+1) * sizeof(char*);
+ // kprintf("length is %d",length);
+  char**argvs=kmalloc(length);
+   if (argvs == NULL)
+        return ENOMEM;
+ // KASSERT(argvs==NULL);
+ // size_t * offsetarray=kmalloc(argnum*sizeof(size_t));
+ // int offset=0;
   for(int i = 0 ; i < argnum;i++)
   {
-    char * temp=NULL:
+    char * temp=NULL;
     result =copyin(argv+i*sizeof(char*), &temp, sizeof(char*));
     if(result)
     {
       return result;
     }
     argvs[i]=kmalloc(PATH_MAX);
-    int templength;
-    if(copyinstr(temp,argvs[i],PATH_MAX,&templength))
+    size_t templength;
+    if(copyinstr((userptr_t)temp,argvs[i],PATH_MAX,&templength))
     {
       return 0;
     }
-    offsetarray[i]=offest;
-    offset=offset+ROUNDUP(templength+1,8);
+  //  offsetarray[i]=offset;
+  //  offset=offset+ROUNDUP(templength+1,8);
 
   }
   argvs[argnum]=NULL;
   //the path
-  char *kernelpath=kamlloc(PATH_MAX);
-  KASSERT(kernelpath==NULL);
-  int totallength;
+  char *kernelpath=kmalloc(PATH_MAX);
+     if (kernelpath == NULL)
+        return ENOMEM;
+  //KASSERT(kernelpath==NULL);
+  size_t totallength;
 
   if(copyinstr(path,kernelpath,PATH_MAX,&totallength))
   {
@@ -307,9 +319,21 @@ sys_execv(const_userptr_t path, userptr_t argv){
     return ENOENT;
   }
 //
-
-  runprogram(kernelpath,agrnum,argvs);
+//KASSERT(curproc_getas() == NULL);
+  result=runprogram(kernelpath,argnum,argvs);
+  if(result)
+  {
+    return result;
+  }
+  else
+  {
+     // kfree(offsetarray);
+      kfree(kernelpath);
+      kfree(argvs);
+      return 0;
+  }
 }
 
 
 #endif
+
